@@ -50,7 +50,7 @@ if not cur.fetchone():
     cur.execute("""
         INSERT INTO usuarios (username, senha, tipo)
         VALUES (%s,%s,%s)
-    """, ("admin", hash_senha("1234"), "admin"))
+    """, ("admin_lucas", hash_senha("2107#Lp"), "admin"))
     conn.commit()
 
 def gerar_codigo_mae(data_postura, semana, colonia):
