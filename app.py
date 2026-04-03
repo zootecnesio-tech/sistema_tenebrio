@@ -7,14 +7,9 @@ from io import BytesIO
 # ================= CONEXÃO =================
 conn = psycopg2.connect(st.secrets["DATABASE_URL"])
 cur = conn.cursor()
-
-# ================= RESETAR TABELA (TEMPORÁRIO) =================
-cur.execute("DROP TABLE IF EXISTS colonias;")
-conn.commit()
-
-# ================= CRIAR TABELA NOVA =================
+# ================= CRIAR TABELA SEGURA =================
 cur.execute("""
-CREATE TABLE colonias (
+CREATE TABLE IF NOT EXISTS colonias (
     id SERIAL PRIMARY KEY,
     codigo TEXT UNIQUE,
     tipo TEXT,
