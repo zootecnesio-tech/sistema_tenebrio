@@ -7,6 +7,9 @@ from PIL import Image, ImageDraw, ImageFont
 import pandas as pd
 import hashlib
 
+# ================= CONFIG =================
+st.set_page_config(page_title="Sistema Tenebrio", layout="wide")
+
 # ================= CONEXÃO =================
 conn = psycopg2.connect(st.secrets["DATABASE_URL"])
 cur = conn.cursor()
@@ -37,7 +40,6 @@ CREATE TABLE IF NOT EXISTS usuarios (
     tipo TEXT
 );
 """)
-
 conn.commit()
 
 # ================= FUNÇÕES =================
@@ -50,7 +52,7 @@ if not cur.fetchone():
     cur.execute("""
         INSERT INTO usuarios (username, senha, tipo)
         VALUES (%s,%s,%s)
-    """, ("admin_lucas", hash_senha("2107#Lp"), "admin"))
+    """, ("admin", hash_senha("1234"), "admin"))
     conn.commit()
 
 def gerar_codigo_mae(data_postura, semana, colonia):
@@ -66,7 +68,7 @@ def gerar_codigo_filha(data_postura, semana, colonia):
 
 # ================= LOGIN =================
 def tela_login():
-    st.title("🔐 Login")
+    st.title("🔐 Login obrigatório")
 
     user = st.text_input("Usuário")
     senha = st.text_input("Senha", type="password")
@@ -83,15 +85,22 @@ def tela_login():
         else:
             st.error("Usuário ou senha inválidos")
 
+# ================= CONTROLE DE ACESSO =================
 if "logado" not in st.session_state:
     st.session_state["logado"] = False
 
+# 🚨 BLOQUEIO TOTAL DO APP
 if not st.session_state["logado"]:
     tela_login()
     st.stop()
 
-# ================= APP =================
+# ================= APP LIBERADO =================
 st.title("🐞 Sistema Zootécnico - Tenebrio")
+
+# 🔓 botão logout
+if st.button("🚪 Sair"):
+    st.session_state.clear()
+    st.rerun()
 
 aba1, aba2 = st.tabs(["📋 Operacional", "📊 Dashboard BI"])
 
@@ -166,10 +175,7 @@ with aba1:
         url = f"https://sistematenebrio-7k6ghyudmfptwrjdxomrs6.streamlit.app/?codigo={codigo}"
 
         st.code(codigo)
-
-        # QR
-        qr = qrcode.make(url)
-        st.image(qr)
+        st.image(qrcode.make(url))
 
     # ================= USUÁRIOS =================
     st.subheader("👥 Usuários")
@@ -189,7 +195,7 @@ with aba1:
                 conn.commit()
                 st.success("Usuário criado")
             except:
-                st.error("Erro (usuário pode já existir)")
+                st.error("Usuário já existe")
 
 # =========================================================
 # ================= DASHBOARD ==============================
@@ -205,7 +211,6 @@ with aba2:
 
         st.metric("Produção total", int(filhas["peso_larvas"].fillna(0).sum()))
 
-        # parâmetros
         custo_farelo = st.sidebar.number_input("R$/kg farelo", value=1.5)
         custo_op = st.sidebar.number_input("Custo caixa", value=0.5)
 
@@ -214,7 +219,6 @@ with aba2:
         filhas["custo_total"] = (1.5*custo_farelo) + custo_op
         filhas["custo_kg"] = filhas["custo_total"] / (filhas["peso_larvas"]/1000)
 
-        # ranking
         filhas["score"] = (
             filhas["peso_larvas"]*0.5 +
             filhas["ef_final"]*0.3 +
@@ -226,7 +230,6 @@ with aba2:
         st.subheader("🏆 Ranking")
         st.dataframe(ranking[["codigo","score"]])
 
-        # lucro
         preco = st.number_input("Preço venda R$/kg", value=30.0)
 
         filhas["receita"] = (filhas["peso_larvas"]/1000)*preco
