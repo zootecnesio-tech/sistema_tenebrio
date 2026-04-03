@@ -8,12 +8,16 @@ from io import BytesIO
 conn = psycopg2.connect(st.secrets["DATABASE_URL"])
 cur = conn.cursor()
 
-# ================= TABELA =================
+# ================= RESETAR TABELA (TEMPORÁRIO) =================
+cur.execute("DROP TABLE IF EXISTS colonias;")
+conn.commit()
+
+# ================= CRIAR TABELA NOVA =================
 cur.execute("""
-CREATE TABLE IF NOT EXISTS colonias (
+CREATE TABLE colonias (
     id SERIAL PRIMARY KEY,
     codigo TEXT UNIQUE,
-    tipo TEXT,  -- MAE ou FILHA
+    tipo TEXT,
 
     data_postura DATE,
     semana TEXT,
@@ -32,7 +36,7 @@ CREATE TABLE IF NOT EXISTS colonias (
 """)
 conn.commit()
 
-# ================= GERAR CÓDIGOS =================
+# ================= FUNÇÕES =================
 def gerar_codigo_mae(data_postura, semana, colonia):
     return f"{data_postura.strftime('%Y%m%d')}-S{semana[0]}-M{colonia}"
 
@@ -89,18 +93,18 @@ if dados:
         if st.button("🗑️ Deletar"):
             cur.execute("DELETE FROM colonias WHERE codigo=%s", (codigo,))
             conn.commit()
-            st.warning("Deletado!")
+            st.warning("Colônia deletada!")
 
 # ================= CRIAR =================
 else:
-    st.subheader("➕ Criar nova")
+    st.subheader("➕ Criar nova colônia")
 
     tipo = st.selectbox("Tipo", ["MAE", "FILHA"])
-    data_postura = st.date_input("Data")
+    data_postura = st.date_input("Data de postura")
     semana = st.selectbox("Semana", ["1ª","2ª","3ª","4ª"])
     colonia = st.number_input("Número da colônia mãe", step=1)
 
-    if st.button("🚀 Gerar"):
+    if st.button("🚀 Gerar colônia"):
         if tipo == "MAE":
             codigo_gerado = gerar_codigo_mae(data_postura, semana, colonia)
         else:
@@ -117,9 +121,9 @@ else:
 
         conn.commit()
 
-        st.success("Criado com sucesso!")
+        st.success("Colônia criada com sucesso!")
 
-        st.markdown(f"### Código:")
+        st.markdown("### Código da colônia:")
         st.code(codigo_gerado)
 
         # ================= QR =================
@@ -130,10 +134,10 @@ else:
         qr.save(buf)
         buf.seek(0)
 
-        st.image(buf)
+        st.image(buf, caption="QR Code da colônia")
 
         st.download_button(
-            "📥 Baixar QR",
+            "📥 Baixar QR para impressão",
             data=buf,
             file_name=f"{codigo_gerado}.png",
             mime="image/png"
