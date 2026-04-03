@@ -3,11 +3,13 @@ import psycopg2
 from datetime import datetime, timedelta
 import qrcode
 from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
 
 # ================= CONEXÃO =================
 conn = psycopg2.connect(st.secrets["DATABASE_URL"])
 cur = conn.cursor()
-# ================= CRIAR TABELA SEGURA =================
+
+# ================= TABELA =================
 cur.execute("""
 CREATE TABLE IF NOT EXISTS colonias (
     id SERIAL PRIMARY KEY,
@@ -22,8 +24,6 @@ CREATE TABLE IF NOT EXISTS colonias (
     peso_larvas REAL,
     peso_divisao REAL,
     peso_pupas REAL,
-
-    num_caixas INTEGER,
 
     data_colheita DATE,
     status TEXT
@@ -42,146 +42,136 @@ def gerar_codigo_filha(data_postura, semana, colonia):
     """, (data_postura, colonia))
 
     seq = cur.fetchone()[0] + 1
-
     return f"{data_postura.strftime('%Y%m%d')}-S{semana[0]}-M{colonia}-F{seq}"
 
-# ================= LER QR =================
+# ================= CAPTURA QR =================
 params = st.query_params
-codigo_url = params.get("codigo", "")
+codigo_qr = params.get("codigo", "")
 
 st.title("🐞 Sistema Zootécnico - Tenebrio")
 
 # ================= BUSCA =================
-codigo = st.text_input("Código da colônia", value=codigo_url)
+st.subheader("🔍 Buscar colônia")
 
-dados = None
-if codigo:
-    cur.execute("SELECT * FROM colonias WHERE codigo=%s", (codigo,))
+codigo_input = st.text_input("Digite ou escaneie o código", value=codigo_qr)
+
+if codigo_input:
+    cur.execute("SELECT * FROM colonias WHERE codigo=%s", (codigo_input,))
     dados = cur.fetchone()
 
-# ================= SE EXISTIR =================
-if dados:
-    st.success(f"Colônia carregada: {codigo}")
-    st.markdown(f"**Tipo:** {dados[2]}")
+    if dados:
+        st.success(f"Colônia encontrada: {codigo_input}")
+        st.markdown(f"**Tipo:** {dados[2]}")
 
-    peso_ovos = st.number_input("Peso ovos (g)", value=dados[6] or 0.0)
-    peso_larvas = st.number_input("Peso larvas (g)", value=dados[7] or 0.0)
-    peso_div = st.number_input("Peso divisão (g)", value=dados[8] or 0.0)
-    peso_pupa = st.number_input("Peso pupas (g)", value=dados[9] or 0.0)
+        peso_ovos = st.number_input("Peso ovos (g)", value=dados[6] or 0.0)
+        peso_larvas = st.number_input("Peso larvas (g)", value=dados[7] or 0.0)
+        peso_div = st.number_input("Peso divisão (g)", value=dados[8] or 0.0)
+        peso_pupa = st.number_input("Peso pupas (g)", value=dados[9] or 0.0)
 
-    col1, col2 = st.columns(2)
+        col1, col2 = st.columns(2)
 
-    with col1:
-        if st.button("💾 Salvar"):
-            cur.execute("""
-                UPDATE colonias
-                SET peso_ovos=%s,
-                    peso_larvas=%s,
-                    peso_divisao=%s,
-                    peso_pupas=%s
-                WHERE codigo=%s
-            """, (peso_ovos, peso_larvas, peso_div, peso_pupa, codigo))
-            conn.commit()
-            st.success("Atualizado!")
+        with col1:
+            if st.button("💾 Atualizar dados"):
+                cur.execute("""
+                    UPDATE colonias
+                    SET peso_ovos=%s,
+                        peso_larvas=%s,
+                        peso_divisao=%s,
+                        peso_pupas=%s
+                    WHERE codigo=%s
+                """, (peso_ovos, peso_larvas, peso_div, peso_pupa, codigo_input))
+                conn.commit()
+                st.success("Dados atualizados!")
 
-    with col2:
-        if st.button("🗑️ Deletar"):
-            cur.execute("DELETE FROM colonias WHERE codigo=%s", (codigo,))
-            conn.commit()
-            st.warning("Colônia deletada!")
+        with col2:
+            if st.button("🗑️ Deletar colônia"):
+                cur.execute("DELETE FROM colonias WHERE codigo=%s", (codigo_input,))
+                conn.commit()
+                st.warning("Colônia deletada!")
 
-# ================= CRIAR =================
-else:
-    st.subheader("➕ Criar nova colônia")
+    else:
+        st.warning("Colônia não encontrada")
 
-    tipo = st.selectbox("Tipo", ["MAE", "FILHA"])
-    data_postura = st.date_input("Data de postura")
-    semana = st.selectbox("Semana", ["1ª","2ª","3ª","4ª"])
-    colonia = st.number_input("Número da colônia mãe", step=1)
+# ================= CRIAÇÃO =================
+st.subheader("➕ Criar nova colônia")
 
-    if st.button("🚀 Gerar colônia"):
-        if tipo == "MAE":
-            codigo_gerado = gerar_codigo_mae(data_postura, semana, colonia)
-        else:
-            codigo_gerado = gerar_codigo_filha(data_postura, semana, colonia)
+tipo = st.selectbox("Tipo", ["MAE", "FILHA"])
+data_postura = st.date_input("Data de postura")
+semana = st.selectbox("Semana", ["1ª","2ª","3ª","4ª"])
+colonia = st.number_input("Número da colônia mãe", step=1)
 
-        data_colheita = data_postura + timedelta(days=80)
+if st.button("🚀 Gerar colônia"):
 
-        cur.execute("""
-            INSERT INTO colonias 
-            (codigo, tipo, data_postura, semana, colonia_mae, data_colheita, status)
-            VALUES (%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (codigo) DO NOTHING
-        """, (codigo_gerado, tipo, data_postura, semana, colonia, data_colheita, "ATIVO"))
+    if tipo == "MAE":
+        codigo_gerado = gerar_codigo_mae(data_postura, semana, colonia)
+    else:
+        codigo_gerado = gerar_codigo_filha(data_postura, semana, colonia)
 
-        conn.commit()
+    data_colheita = data_postura + timedelta(days=80)
 
-        st.success("Colônia criada com sucesso!")
+    cur.execute("""
+        INSERT INTO colonias 
+        (codigo, tipo, data_postura, semana, colonia_mae, data_colheita, status)
+        VALUES (%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (codigo) DO NOTHING
+    """, (codigo_gerado, tipo, data_postura, semana, colonia, data_colheita, "ATIVO"))
 
-        st.markdown("### Código da colônia:")
-        st.code(codigo_gerado)
+    conn.commit()
 
-        # ================= QR =================
-        url = f"https://sistematenebrio-7k6ghyudmfptwrjdxomrs6.streamlit.app/?codigo={codigo_gerado}"
+    # ================= URL QR =================
+    url = f"https://sistematenebrio-7k6ghyudmfptwrjdxomrs6.streamlit.app/?codigo={codigo_gerado}"
 
-from PIL import Image, ImageDraw, ImageFont
+    st.success("Colônia criada com sucesso!")
+    st.code(codigo_gerado)
 
-# tamanho exato da etiqueta
-largura_px = 531
-altura_px = 331
+    # ================= ETIQUETA 45x28 =================
+    largura_px = 531
+    altura_px = 331
 
-img = Image.new("RGB", (largura_px, altura_px), "white")
+    img = Image.new("RGB", (largura_px, altura_px), "white")
 
-# QR mais limpo para impressora térmica
-qr = qrcode.QRCode(
-    version=2,
-    error_correction=qrcode.constants.ERROR_CORRECT_M,
-    box_size=8,
-    border=1
-)
-qr.add_data(url)
-qr.make(fit=True)
+    qr = qrcode.QRCode(
+        version=2,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=8,
+        border=1
+    )
+    qr.add_data(url)
+    qr.make(fit=True)
 
-qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+    qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+    qr_img = qr_img.resize((260, 260))
 
-# tamanho do QR
-qr_size = 260
-qr_img = qr_img.resize((qr_size, qr_size))
+    img.paste(qr_img, (10, 35))
 
-img.paste(qr_img, (10, 35))
+    draw = ImageDraw.Draw(img)
 
-draw = ImageDraw.Draw(img)
+    try:
+        font1 = ImageFont.truetype("arial.ttf", 26)
+        font2 = ImageFont.truetype("arial.ttf", 22)
+    except:
+        font1 = None
+        font2 = None
 
-# fontes simples (melhor para térmica)
-try:
-    font1 = ImageFont.truetype("arial.ttf", 26)
-    font2 = ImageFont.truetype("arial.ttf", 22)
-except:
-    font1 = None
-    font2 = None
+    x = 280
 
-# texto
-x = 280
+    draw.text((x, 40), tipo, fill="black", font=font1)
 
-draw.text((x, 40), tipo, fill="black", font=font1)
+    codigo1 = codigo_gerado[:len(codigo_gerado)//2]
+    codigo2 = codigo_gerado[len(codigo_gerado)//2:]
 
-# código quebrado
-codigo1 = codigo_gerado[:len(codigo_gerado)//2]
-codigo2 = codigo_gerado[len(codigo_gerado)//2:]
+    draw.text((x, 120), codigo1, fill="black", font=font2)
+    draw.text((x, 170), codigo2, fill="black", font=font2)
 
-draw.text((x, 120), codigo1, fill="black", font=font2)
-draw.text((x, 170), codigo2, fill="black", font=font2)
+    buf = BytesIO()
+    img.save(buf, format="PNG", dpi=(300,300))
+    buf.seek(0)
 
-# salvar
-buf = BytesIO()
-img.save(buf, format="PNG", dpi=(300,300))
-buf.seek(0)
+    st.image(buf, caption="Etiqueta pronta para impressão")
 
-st.image(buf)
-
-st.download_button(
-    "📥 Baixar etiqueta (pronta para DLabel)",
-    data=buf,
-    file_name=f"{codigo_gerado}.png",
-    mime="image/png"
-)
+    st.download_button(
+        "📥 Baixar etiqueta",
+        data=buf,
+        file_name=f"{codigo_gerado}.png",
+        mime="image/png"
+    )
