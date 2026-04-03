@@ -124,16 +124,64 @@ else:
         # ================= QR =================
         url = f"https://sistematenebrio-7k6ghyudmfptwrjdxomrs6.streamlit.app/?codigo={codigo_gerado}"
 
-        qr = qrcode.make(url)
-        buf = BytesIO()
-        qr.save(buf)
-        buf.seek(0)
+from PIL import Image, ImageDraw, ImageFont
 
-        st.image(buf, caption="QR Code da colônia")
+# tamanho exato da etiqueta
+largura_px = 531
+altura_px = 331
 
-        st.download_button(
-            "📥 Baixar QR para impressão",
-            data=buf,
-            file_name=f"{codigo_gerado}.png",
-            mime="image/png"
-        )
+img = Image.new("RGB", (largura_px, altura_px), "white")
+
+# QR mais limpo para impressora térmica
+qr = qrcode.QRCode(
+    version=2,
+    error_correction=qrcode.constants.ERROR_CORRECT_M,
+    box_size=8,
+    border=1
+)
+qr.add_data(url)
+qr.make(fit=True)
+
+qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+
+# tamanho do QR
+qr_size = 260
+qr_img = qr_img.resize((qr_size, qr_size))
+
+img.paste(qr_img, (10, 35))
+
+draw = ImageDraw.Draw(img)
+
+# fontes simples (melhor para térmica)
+try:
+    font1 = ImageFont.truetype("arial.ttf", 26)
+    font2 = ImageFont.truetype("arial.ttf", 22)
+except:
+    font1 = None
+    font2 = None
+
+# texto
+x = 280
+
+draw.text((x, 40), tipo, fill="black", font=font1)
+
+# código quebrado
+codigo1 = codigo_gerado[:len(codigo_gerado)//2]
+codigo2 = codigo_gerado[len(codigo_gerado)//2:]
+
+draw.text((x, 120), codigo1, fill="black", font=font2)
+draw.text((x, 170), codigo2, fill="black", font=font2)
+
+# salvar
+buf = BytesIO()
+img.save(buf, format="PNG", dpi=(300,300))
+buf.seek(0)
+
+st.image(buf)
+
+st.download_button(
+    "📥 Baixar etiqueta (pronta para DLabel)",
+    data=buf,
+    file_name=f"{codigo_gerado}.png",
+    mime="image/png"
+)
