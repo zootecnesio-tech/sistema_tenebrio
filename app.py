@@ -22,83 +22,88 @@ CREATE TABLE IF NOT EXISTS colonias (
     peso_farelo_g REAL DEFAULT 1500,
 
     peso_ovos_8d REAL,
-    data_manejo_8d DATE,
-
     peso_larvas_20d REAL,
     peso_larvas_divisao REAL,
     peso_pupas REAL,
 
     num_caixas INTEGER,
 
-    densidade_larval REAL,
-    mortalidade REAL,
-
     data_colheita DATE,
-
-    residuo_parcial REAL,
-    residuo_final REAL,
-
     status TEXT
 );
 """)
 conn.commit()
 
-# ================= FUNÇÃO CÓDIGO =================
+# ================= GERAR CÓDIGO COM SEQUÊNCIA =================
 def gerar_codigo(data_postura, semana, colonia):
-    return f"{data_postura.strftime('%Y%m%d')}-S{semana[0]}-C{colonia}"
+    data_str = data_postura.strftime('%Y%m%d')
+
+    cur.execute("""
+        SELECT COUNT(*) FROM colonias 
+        WHERE data_postura = %s
+    """, (data_postura,))
+    
+    count = cur.fetchone()[0] + 1
+
+    return f"{data_str}-S{semana[0]}-C{colonia}-N{count}"
 
 # ================= PEGAR CÓDIGO DA URL =================
 params = st.query_params
 codigo_url = params.get("codigo", "")
 
-# ================= INTERFACE =================
 st.title("🐞 Sistema Zootécnico - Tenebrio")
 
 # ================= BUSCA AUTOMÁTICA =================
-st.subheader("🔍 Buscar / Atualizar colônia")
-
 codigo = st.text_input("Código da colônia", value=codigo_url)
 
 dados = None
+
 if codigo:
     cur.execute("SELECT * FROM colonias WHERE codigo=%s", (codigo,))
     dados = cur.fetchone()
 
 # ================= SE ENCONTRAR =================
 if dados:
-    st.success(f"Colônia carregada: {codigo}")
+    st.success(f"Colônia carregada automaticamente: {codigo}")
 
     peso_ovos = st.number_input("Peso ovos (g)", value=dados[7] or 0.0)
-    peso_20d = st.number_input("Peso larvas 20 dias (g)", value=dados[9] or 0.0)
-    peso_div = st.number_input("Peso divisão (g)", value=dados[10] or 0.0)
-    peso_pupa = st.number_input("Peso pupas (g)", value=dados[11] or 0.0)
-    caixas = st.number_input("Número de caixas", value=dados[12] or 2)
+    peso_20d = st.number_input("Peso larvas 20 dias (g)", value=dados[8] or 0.0)
+    peso_div = st.number_input("Peso divisão (g)", value=dados[9] or 0.0)
+    peso_pupa = st.number_input("Peso pupas (g)", value=dados[10] or 0.0)
+    caixas = st.number_input("Número de caixas", value=dados[11] or 2)
 
-    if st.button("💾 Salvar dados"):
-        cur.execute("""
-            UPDATE colonias
-            SET peso_ovos_8d=%s,
-                peso_larvas_20d=%s,
-                peso_larvas_divisao=%s,
-                peso_pupas=%s,
-                num_caixas=%s
-            WHERE codigo=%s
-        """, (peso_ovos, peso_20d, peso_div, peso_pupa, caixas, codigo))
+    col1, col2 = st.columns(2)
 
-        conn.commit()
-        st.success("Dados atualizados com sucesso!")
+    with col1:
+        if st.button("💾 Salvar"):
+            cur.execute("""
+                UPDATE colonias
+                SET peso_ovos_8d=%s,
+                    peso_larvas_20d=%s,
+                    peso_larvas_divisao=%s,
+                    peso_pupas=%s,
+                    num_caixas=%s
+                WHERE codigo=%s
+            """, (peso_ovos, peso_20d, peso_div, peso_pupa, caixas, codigo))
+
+            conn.commit()
+            st.success("Atualizado!")
+
+    with col2:
+        if st.button("🗑️ Deletar colônia"):
+            cur.execute("DELETE FROM colonias WHERE codigo=%s", (codigo,))
+            conn.commit()
+            st.warning("Colônia deletada!")
 
 # ================= SE NÃO ENCONTRAR =================
 elif codigo:
     st.warning("Colônia não encontrada")
 
-    st.subheader("➕ Criar nova colônia")
-
     data_postura = st.date_input("Data de postura")
     semana = st.selectbox("Semana", ["1ª","2ª","3ª","4ª"])
     colonia = st.number_input("Colônia", step=1)
 
-    if st.button("🚀 Gerar e salvar colônia"):
+    if st.button("🚀 Criar colônia"):
         codigo = gerar_codigo(data_postura, semana, colonia)
         data_colheita = data_postura + timedelta(days=80)
 
@@ -106,26 +111,24 @@ elif codigo:
             INSERT INTO colonias 
             (codigo, data_postura, semana_postura, colonia, data_colheita, status)
             VALUES (%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (codigo) DO NOTHING
         """, (codigo, data_postura, semana, colonia, data_colheita, "EM PRODUÇÃO"))
 
         conn.commit()
 
         st.success(f"Colônia criada: {codigo}")
 
-        # ================= GERAR QR =================
+        # ================= QR =================
         url = f"https://sistematenebrio-7k6ghyudmfptwrjdxomrs6.streamlit.app/?codigo={codigo}"
 
         qr = qrcode.make(url)
-
         buf = BytesIO()
         qr.save(buf)
         buf.seek(0)
 
-        st.image(buf, caption="QR Code da colônia")
+        st.image(buf, caption="QR Code")
 
         st.download_button(
-            label="📥 Baixar QR Code",
+            "📥 Baixar QR",
             data=buf,
             file_name=f"{codigo}.png",
             mime="image/png"
