@@ -1,12 +1,14 @@
 import streamlit as st
 import psycopg2
 from datetime import datetime, timedelta
+import qrcode
+from io import BytesIO
 
-# conexão com banco
+# ================= CONEXÃO =================
 conn = psycopg2.connect(st.secrets["DATABASE_URL"])
 cur = conn.cursor()
 
-# criar tabela automaticamente
+# ================= CRIAR TABELA =================
 cur.execute("""
 CREATE TABLE IF NOT EXISTS colonias (
     id SERIAL PRIMARY KEY,
@@ -41,10 +43,11 @@ CREATE TABLE IF NOT EXISTS colonias (
 """)
 conn.commit()
 
-# função código
+# ================= FUNÇÃO CÓDIGO =================
 def gerar_codigo(data_postura, semana, colonia):
     return f"{data_postura.strftime('%Y%m%d')}-S{semana[0]}-C{colonia}"
 
+# ================= INTERFACE =================
 st.title("🐞 Sistema Zootécnico - Tenebrio")
 
 # ================= NOVA COLÔNIA =================
@@ -69,11 +72,29 @@ if st.button("Gerar e salvar"):
 
     st.success(f"Código gerado: {codigo}")
 
+    # ================= GERAR QR =================
+    url = f"https://sistematenebrio-7k6ghyudmfptwrjdxomrs6.streamlit.app/?codigo={codigo}"
+
+    qr = qrcode.make(url)
+
+    buf = BytesIO()
+    qr.save(buf)
+    buf.seek(0)
+
+    st.image(buf, caption="QR Code da colônia")
+
+    st.download_button(
+        label="📥 Baixar QR Code",
+        data=buf,
+        file_name=f"{codigo}.png",
+        mime="image/png"
+    )
+
 # ================= BUSCA =================
 st.divider()
 st.subheader("🔍 Buscar colônia")
 
-codigo = st.text_input("Código")
+codigo = st.text_input("Código da colônia")
 
 if codigo:
     cur.execute("SELECT * FROM colonias WHERE codigo=%s", (codigo,))
@@ -83,7 +104,7 @@ if codigo:
         st.success("Colônia encontrada")
 
         peso_ovos = st.number_input("Peso ovos (g)")
-        peso_20d = st.number_input("Peso larvas 20d (g)")
+        peso_20d = st.number_input("Peso larvas 20 dias (g)")
         peso_div = st.number_input("Peso divisão (g)")
         peso_pupa = st.number_input("Peso pupas (g)")
         caixas = st.number_input("Número de caixas", value=2)
@@ -100,4 +121,4 @@ if codigo:
             """, (peso_ovos, peso_20d, peso_div, peso_pupa, caixas, codigo))
 
             conn.commit()
-            st.success("Atualizado!")
+            st.success("Dados atualizados com sucesso!")
