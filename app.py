@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import qrcode
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
+import pandas as pd
 
 # ================= CONEXÃO =================
 conn = psycopg2.connect(st.secrets["DATABASE_URL"])
@@ -40,138 +41,218 @@ def gerar_codigo_filha(data_postura, semana, colonia):
         SELECT COUNT(*) FROM colonias
         WHERE data_postura = %s AND colonia_mae = %s AND tipo='FILHA'
     """, (data_postura, colonia))
-
     seq = cur.fetchone()[0] + 1
     return f"{data_postura.strftime('%Y%m%d')}-S{semana[0]}-M{colonia}-F{seq}"
 
-# ================= CAPTURA QR =================
+# ================= QR PARAM =================
 params = st.query_params
 codigo_qr = params.get("codigo", "")
 
 st.title("🐞 Sistema Zootécnico - Tenebrio")
 
-# ================= BUSCA =================
-st.subheader("🔍 Buscar colônia")
+# ================= ABAS =================
+aba1, aba2 = st.tabs(["📋 Operacional", "📊 Dashboard BI"])
 
-codigo_input = st.text_input("Digite ou escaneie o código", value=codigo_qr)
+# =========================================================
+# ================= ABA OPERACIONAL ========================
+# =========================================================
+with aba1:
 
-if codigo_input:
-    cur.execute("SELECT * FROM colonias WHERE codigo=%s", (codigo_input,))
-    dados = cur.fetchone()
+    # ================= BUSCA =================
+    st.subheader("🔍 Buscar colônia")
 
-    if dados:
-        st.success(f"Colônia encontrada: {codigo_input}")
-        st.markdown(f"**Tipo:** {dados[2]}")
+    codigo_input = st.text_input("Digite ou escaneie o código", value=codigo_qr)
 
-        peso_ovos = st.number_input("Peso ovos (g)", value=dados[6] or 0.0)
-        peso_larvas = st.number_input("Peso larvas (g)", value=dados[7] or 0.0)
-        peso_div = st.number_input("Peso divisão (g)", value=dados[8] or 0.0)
-        peso_pupa = st.number_input("Peso pupas (g)", value=dados[9] or 0.0)
+    if codigo_input:
+        cur.execute("SELECT * FROM colonias WHERE codigo=%s", (codigo_input,))
+        dados = cur.fetchone()
 
-        col1, col2 = st.columns(2)
+        if dados:
+            st.success(f"Colônia encontrada: {codigo_input}")
+            st.markdown(f"**Tipo:** {dados[2]}")
 
-        with col1:
-            if st.button("💾 Atualizar dados"):
-                cur.execute("""
-                    UPDATE colonias
-                    SET peso_ovos=%s,
-                        peso_larvas=%s,
-                        peso_divisao=%s,
-                        peso_pupas=%s
-                    WHERE codigo=%s
-                """, (peso_ovos, peso_larvas, peso_div, peso_pupa, codigo_input))
-                conn.commit()
-                st.success("Dados atualizados!")
+            peso_ovos = st.number_input("Peso ovos (g)", value=dados[6] or 0.0)
+            peso_larvas = st.number_input("Peso larvas (g)", value=dados[7] or 0.0)
+            peso_div = st.number_input("Peso divisão (g)", value=dados[8] or 0.0)
+            peso_pupa = st.number_input("Peso pupas (g)", value=dados[9] or 0.0)
 
-        with col2:
-            if st.button("🗑️ Deletar colônia"):
-                cur.execute("DELETE FROM colonias WHERE codigo=%s", (codigo_input,))
-                conn.commit()
-                st.warning("Colônia deletada!")
+            col1, col2 = st.columns(2)
+
+            with col1:
+                if st.button("💾 Atualizar dados"):
+                    cur.execute("""
+                        UPDATE colonias
+                        SET peso_ovos=%s,
+                            peso_larvas=%s,
+                            peso_divisao=%s,
+                            peso_pupas=%s
+                        WHERE codigo=%s
+                    """, (peso_ovos, peso_larvas, peso_div, peso_pupa, codigo_input))
+                    conn.commit()
+                    st.success("Dados atualizados!")
+
+            with col2:
+                if st.button("🗑️ Deletar colônia"):
+                    cur.execute("DELETE FROM colonias WHERE codigo=%s", (codigo_input,))
+                    conn.commit()
+                    st.warning("Colônia deletada!")
+
+        else:
+            st.warning("Colônia não encontrada")
+
+    # ================= CRIAÇÃO =================
+    st.subheader("➕ Criar nova colônia")
+
+    tipo = st.selectbox("Tipo", ["MAE", "FILHA"])
+    data_postura = st.date_input("Data de postura")
+    semana = st.selectbox("Semana", ["1ª","2ª","3ª","4ª"])
+    colonia = st.number_input("Número da colônia mãe", step=1)
+
+    if st.button("🚀 Gerar colônia"):
+
+        if tipo == "MAE":
+            codigo_gerado = gerar_codigo_mae(data_postura, semana, colonia)
+        else:
+            codigo_gerado = gerar_codigo_filha(data_postura, semana, colonia)
+
+        data_colheita = data_postura + timedelta(days=80)
+
+        cur.execute("""
+            INSERT INTO colonias 
+            (codigo, tipo, data_postura, semana, colonia_mae, data_colheita, status)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (codigo) DO NOTHING
+        """, (codigo_gerado, tipo, data_postura, semana, colonia, data_colheita, "ATIVO"))
+
+        conn.commit()
+
+        # URL QR
+        url = f"https://sistematenebrio-7k6ghyudmfptwrjdxomrs6.streamlit.app/?codigo={codigo_gerado}"
+
+        st.success("Colônia criada com sucesso!")
+        st.code(codigo_gerado)
+
+        # ================= ETIQUETA =================
+        largura_px = 531
+        altura_px = 331
+
+        img = Image.new("RGB", (largura_px, altura_px), "white")
+
+        qr = qrcode.QRCode(
+            version=2,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=8,
+            border=1
+        )
+        qr.add_data(url)
+        qr.make(fit=True)
+
+        qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+        qr_img = qr_img.resize((260, 260))
+
+        img.paste(qr_img, (10, 35))
+
+        draw = ImageDraw.Draw(img)
+
+        try:
+            font1 = ImageFont.truetype("arial.ttf", 26)
+            font2 = ImageFont.truetype("arial.ttf", 22)
+        except:
+            font1 = None
+            font2 = None
+
+        x = 280
+
+        draw.text((x, 40), tipo, fill="black", font=font1)
+
+        codigo1 = codigo_gerado[:len(codigo_gerado)//2]
+        codigo2 = codigo_gerado[len(codigo_gerado)//2:]
+
+        draw.text((x, 120), codigo1, fill="black", font=font2)
+        draw.text((x, 170), codigo2, fill="black", font=font2)
+
+        buf = BytesIO()
+        img.save(buf, format="PNG", dpi=(300,300))
+        buf.seek(0)
+
+        st.image(buf, caption="Etiqueta pronta")
+
+        st.download_button(
+            "📥 Baixar etiqueta",
+            data=buf,
+            file_name=f"{codigo_gerado}.png",
+            mime="image/png"
+        )
+
+# =========================================================
+# ================= DASHBOARD BI ===========================
+# =========================================================
+with aba2:
+
+    st.header("📊 Dashboard Zootécnico + Econômico")
+
+    df = pd.read_sql("SELECT * FROM colonias", conn)
+
+    if df.empty:
+        st.warning("Sem dados ainda")
 
     else:
-        st.warning("Colônia não encontrada")
+        df["data_postura"] = pd.to_datetime(df["data_postura"])
+        df["data_colheita"] = pd.to_datetime(df["data_colheita"])
 
-# ================= CRIAÇÃO =================
-st.subheader("➕ Criar nova colônia")
+        maes = df[df["tipo"] == "MAE"]
+        filhas = df[df["tipo"] == "FILHA"]
 
-tipo = st.selectbox("Tipo", ["MAE", "FILHA"])
-data_postura = st.date_input("Data de postura")
-semana = st.selectbox("Semana", ["1ª","2ª","3ª","4ª"])
-colonia = st.number_input("Número da colônia mãe", step=1)
+        # ================= KPIs =================
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Colônias MÃE", len(maes))
+        col2.metric("Caixas FILHAS", len(filhas))
+        col3.metric("Produção total (g)", int(filhas["peso_larvas"].fillna(0).sum()))
 
-if st.button("🚀 Gerar colônia"):
+        st.divider()
 
-    if tipo == "MAE":
-        codigo_gerado = gerar_codigo_mae(data_postura, semana, colonia)
-    else:
-        codigo_gerado = gerar_codigo_filha(data_postura, semana, colonia)
+        # ================= PARÂMETROS =================
+        st.sidebar.header("⚙️ Custos")
 
-    data_colheita = data_postura + timedelta(days=80)
+        custo_farelo = st.sidebar.number_input("R$/kg farelo", value=1.50)
+        custo_operacional = st.sidebar.number_input("R$/caixa", value=0.50)
 
-    cur.execute("""
-        INSERT INTO colonias 
-        (codigo, tipo, data_postura, semana, colonia_mae, data_colheita, status)
-        VALUES (%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (codigo) DO NOTHING
-    """, (codigo_gerado, tipo, data_postura, semana, colonia, data_colheita, "ATIVO"))
+        # ================= EFICIÊNCIA =================
+        st.subheader("⚙️ Eficiência biológica")
 
-    conn.commit()
+        filhas["ef_20d"] = filhas["peso_larvas"] / filhas["peso_ovos"]
+        filhas["ef_div"] = filhas["peso_divisao"] / filhas["peso_larvas"]
+        filhas["ef_final"] = filhas["peso_larvas"] / filhas["peso_ovos"]
 
-    # ================= URL QR =================
-    url = f"https://sistematenebrio-7k6ghyudmfptwrjdxomrs6.streamlit.app/?codigo={codigo_gerado}"
+        st.dataframe(filhas[["codigo","ef_20d","ef_div","ef_final"]])
 
-    st.success("Colônia criada com sucesso!")
-    st.code(codigo_gerado)
+        # ================= FCR =================
+        st.subheader("🌾 Conversão alimentar")
 
-    # ================= ETIQUETA 45x28 =================
-    largura_px = 531
-    altura_px = 331
+        filhas["fcr"] = 1.5 / (filhas["peso_larvas"] / 1000)
 
-    img = Image.new("RGB", (largura_px, altura_px), "white")
+        st.metric("FCR médio", round(filhas["fcr"].mean(),2))
+        st.dataframe(filhas[["codigo","fcr"]])
 
-    qr = qrcode.QRCode(
-        version=2,
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
-        box_size=8,
-        border=1
-    )
-    qr.add_data(url)
-    qr.make(fit=True)
+        # ================= CUSTO =================
+        st.subheader("💰 Custo por kg")
 
-    qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-    qr_img = qr_img.resize((260, 260))
+        filhas["custo_total"] = (1.5 * custo_farelo) + custo_operacional
+        filhas["custo_kg"] = filhas["custo_total"] / (filhas["peso_larvas"] / 1000)
 
-    img.paste(qr_img, (10, 35))
+        st.metric("Custo médio (R$/kg)", round(filhas["custo_kg"].mean(),2))
+        st.dataframe(filhas[["codigo","custo_total","custo_kg"]])
 
-    draw = ImageDraw.Draw(img)
+        # ================= PRODUÇÃO =================
+        st.subheader("📦 Produção por colônia")
 
-    try:
-        font1 = ImageFont.truetype("arial.ttf", 26)
-        font2 = ImageFont.truetype("arial.ttf", 22)
-    except:
-        font1 = None
-        font2 = None
+        prod = filhas.groupby("colonia_mae")["peso_larvas"].sum()
+        st.bar_chart(prod)
 
-    x = 280
+        # ================= PIPELINE =================
+        st.subheader("⏱️ Colheitas futuras")
 
-    draw.text((x, 40), tipo, fill="black", font=font1)
+        hoje = pd.Timestamp.today()
+        futuras = df[df["data_colheita"] > hoje]
 
-    codigo1 = codigo_gerado[:len(codigo_gerado)//2]
-    codigo2 = codigo_gerado[len(codigo_gerado)//2:]
-
-    draw.text((x, 120), codigo1, fill="black", font=font2)
-    draw.text((x, 170), codigo2, fill="black", font=font2)
-
-    buf = BytesIO()
-    img.save(buf, format="PNG", dpi=(300,300))
-    buf.seek(0)
-
-    st.image(buf, caption="Etiqueta pronta para impressão")
-
-    st.download_button(
-        "📥 Baixar etiqueta",
-        data=buf,
-        file_name=f"{codigo_gerado}.png",
-        mime="image/png"
-    )
+        st.dataframe(futuras[["codigo","data_colheita"]])
