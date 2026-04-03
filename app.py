@@ -1,4 +1,3 @@
-st.write("TESTE LOGIN ATIVO")
 import streamlit as st
 import psycopg2
 from datetime import datetime, timedelta
@@ -9,6 +8,7 @@ import pandas as pd
 import hashlib
 
 # ================= CONFIG =================
+st.write("TESTE LOGIN ATIVO")
 st.set_page_config(page_title="Sistema Tenebrio", layout="wide")
 
 # ================= CONEXÃO =================
