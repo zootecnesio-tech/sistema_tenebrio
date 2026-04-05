@@ -8,7 +8,6 @@ import pandas as pd
 import hashlib
 
 # ================= CONFIG =================
-st.write("TESTE LOGIN ATIVO")
 st.set_page_config(page_title="Sistema Tenebrio", layout="wide")
 
 # ================= CONEXÃO =================
@@ -47,7 +46,6 @@ conn.commit()
 def hash_senha(senha):
     return hashlib.sha256(senha.encode()).hexdigest()
 
-# criar admin padrão
 cur.execute("SELECT * FROM usuarios WHERE username='admin'")
 if not cur.fetchone():
     cur.execute("""
@@ -80,82 +78,38 @@ def tela_login():
 
         if dados and dados[2] == hash_senha(senha):
             st.session_state["logado"] = True
-            st.session_state["usuario"] = user
             st.session_state["tipo"] = dados[3]
             st.rerun()
         else:
             st.error("Usuário ou senha inválidos")
 
-# ================= CONTROLE DE ACESSO =================
 if "logado" not in st.session_state:
     st.session_state["logado"] = False
 
-# 🚨 BLOQUEIO TOTAL DO APP
 if not st.session_state["logado"]:
     tela_login()
     st.stop()
 
-# ================= APP LIBERADO =================
-st.title("🐞 Sistema Zootécnico - Tenebrio")
+# ================= APP =================
+st.title("🐞 Sistema Tenebrio")
 
-# 🔓 botão logout
 if st.button("🚪 Sair"):
     st.session_state.clear()
     st.rerun()
 
-aba1, aba2 = st.tabs(["📋 Operacional", "📊 Dashboard BI"])
+aba1, aba2 = st.tabs(["Operacional", "Dashboard"])
 
-# =========================================================
-# ================= ABA OPERACIONAL ========================
-# =========================================================
+# ================= OPERACIONAL =================
 with aba1:
 
-    st.subheader("🔍 Buscar colônia")
-
-    params = st.query_params
-    codigo_qr = params.get("codigo", "")
-
-    codigo_input = st.text_input("Código", value=codigo_qr)
-
-    if codigo_input:
-        cur.execute("SELECT * FROM colonias WHERE codigo=%s", (codigo_input,))
-        dados = cur.fetchone()
-
-        if dados:
-            st.success(f"Colônia: {codigo_input}")
-
-            peso_ovos = st.number_input("Ovos", value=dados[6] or 0.0)
-            peso_larvas = st.number_input("Larvas", value=dados[7] or 0.0)
-            peso_div = st.number_input("Divisão", value=dados[8] or 0.0)
-            peso_pupa = st.number_input("Pupas", value=dados[9] or 0.0)
-
-            if st.button("Atualizar"):
-                cur.execute("""
-                    UPDATE colonias
-                    SET peso_ovos=%s, peso_larvas=%s,
-                        peso_divisao=%s, peso_pupas=%s
-                    WHERE codigo=%s
-                """, (peso_ovos, peso_larvas, peso_div, peso_pupa, codigo_input))
-                conn.commit()
-                st.success("Atualizado")
-
-            if st.session_state["tipo"] == "admin":
-                if st.button("Deletar"):
-                    cur.execute("DELETE FROM colonias WHERE codigo=%s", (codigo_input,))
-                    conn.commit()
-                    st.warning("Deletado")
-            else:
-                st.info("Sem permissão para deletar")
-
-    # ================= NOVA COLÔNIA =================
-    st.subheader("➕ Nova colônia")
+    st.subheader("Nova colônia")
 
     tipo = st.selectbox("Tipo", ["MAE", "FILHA"])
     data_postura = st.date_input("Data")
     semana = st.selectbox("Semana", ["1ª","2ª","3ª","4ª"])
     colonia = st.number_input("Colônia mãe", step=1)
 
-    if st.button("Gerar"):
+    if st.button("Gerar colônia"):
 
         if tipo == "MAE":
             codigo = gerar_codigo_mae(data_postura, semana, colonia)
@@ -175,67 +129,47 @@ with aba1:
 
         url = f"https://sistematenebrio-7k6ghyudmfptwrjdxomrs6.streamlit.app/?codigo={codigo}"
 
-        st.code(codigo)
-        st.image(qrcode.make(url))
+        # ================= ETIQUETA =================
+        qr = qrcode.QRCode(version=2, box_size=3, border=1)
+        qr.add_data(url)
+        qr.make(fit=True)
 
-    # ================= USUÁRIOS =================
-    st.subheader("👥 Usuários")
+        img_qr = qr.make_image(fill_color="black", back_color="white").convert("RGB")
 
-    if st.session_state["tipo"] == "admin":
+        largura, altura = 300, 180
+        etiqueta = Image.new("RGB", (largura, altura), "white")
 
-        novo = st.text_input("Novo usuário")
-        senha_nova = st.text_input("Senha", type="password")
-        tipo_user = st.selectbox("Tipo usuário", ["admin","operador"])
+        img_qr = img_qr.resize((140, 140))
+        etiqueta.paste(img_qr, (10, 20))
 
-        if st.button("Criar usuário"):
-            try:
-                cur.execute("""
-                    INSERT INTO usuarios (username, senha, tipo)
-                    VALUES (%s,%s,%s)
-                """, (novo, hash_senha(senha_nova), tipo_user))
-                conn.commit()
-                st.success("Usuário criado")
-            except:
-                st.error("Usuário já existe")
+        draw = ImageDraw.Draw(etiqueta)
 
-# =========================================================
-# ================= DASHBOARD ==============================
-# =========================================================
+        try:
+            font = ImageFont.truetype("arial.ttf", 18)
+        except:
+            font = ImageFont.load_default()
+
+        draw.text((160, 20), tipo, fill="black", font=font)
+        draw.text((160, 60), codigo[:15], fill="black", font=font)
+        draw.text((160, 90), codigo[15:], fill="black", font=font)
+        draw.text((160, 130), data_postura.strftime("%d/%m/%Y"), fill="black", font=font)
+
+        buffer = BytesIO()
+        etiqueta.save(buffer, format="PNG")
+        buffer.seek(0)
+
+        st.image(etiqueta)
+        st.download_button(
+            "⬇️ Baixar etiqueta",
+            buffer,
+            file_name=f"{codigo}.png",
+            mime="image/png"
+        )
+
+# ================= DASHBOARD =================
 with aba2:
 
     df = pd.read_sql("SELECT * FROM colonias", conn)
 
-    if df.empty:
-        st.warning("Sem dados")
-    else:
-        filhas = df[df["tipo"] == "FILHA"]
-
-        st.metric("Produção total", int(filhas["peso_larvas"].fillna(0).sum()))
-
-        custo_farelo = st.sidebar.number_input("R$/kg farelo", value=1.5)
-        custo_op = st.sidebar.number_input("Custo caixa", value=0.5)
-
-        filhas["ef_final"] = filhas["peso_larvas"] / filhas["peso_ovos"]
-        filhas["fcr"] = 1.5 / (filhas["peso_larvas"] / 1000)
-        filhas["custo_total"] = (1.5*custo_farelo) + custo_op
-        filhas["custo_kg"] = filhas["custo_total"] / (filhas["peso_larvas"]/1000)
-
-        filhas["score"] = (
-            filhas["peso_larvas"]*0.5 +
-            filhas["ef_final"]*0.3 +
-            (1/filhas["fcr"])*0.2
-        )
-
-        ranking = filhas.sort_values(by="score", ascending=False)
-
-        st.subheader("🏆 Ranking")
-        st.dataframe(ranking[["codigo","score"]])
-
-        preco = st.number_input("Preço venda R$/kg", value=30.0)
-
-        filhas["receita"] = (filhas["peso_larvas"]/1000)*preco
-        filhas["lucro"] = filhas["receita"] - filhas["custo_total"]
-
-        st.subheader("💰 Lucro")
-        st.metric("Lucro total", round(filhas["lucro"].sum(),2))
-        st.dataframe(filhas[["codigo","lucro"]])
+    if not df.empty:
+        st.metric("Produção total", int(df["peso_larvas"].fillna(0).sum()))
