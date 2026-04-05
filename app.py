@@ -186,6 +186,82 @@ with aba1:
 
 # ================= DASHBOARD =================
 with aba2:
+
+    st.subheader("📊 Dashboard Zootécnico")
+
     df = pd.read_sql("SELECT * FROM colonias", conn)
-    if not df.empty:
-        st.metric("Produção total", int(df["peso_larvas"].fillna(0).sum()))
+
+    if df.empty:
+        st.warning("Sem dados")
+    else:
+        # filtrar filhas
+        filhas = df[df["tipo"] == "FILHA"].copy()
+
+        if filhas.empty:
+            st.warning("Sem dados de colônias filhas")
+        else:
+            # ================= PARÂMETROS =================
+            st.sidebar.subheader("Parâmetros produtivos")
+
+            consumo_racao = st.sidebar.number_input("Consumo ração por caixa (kg)", value=1.5)
+            custo_racao = st.sidebar.number_input("Custo ração (R$/kg)", value=1.5)
+            custo_operacional = st.sidebar.number_input("Custo operacional/caixa (R$)", value=0.5)
+            preco_venda = st.sidebar.number_input("Preço venda (R$/kg)", value=30.0)
+
+            # ================= AGRUPAMENTO POR MÃE =================
+            resumo = filhas.groupby("colonia_mae").agg({
+                "peso_larvas": "sum",
+                "peso_ovos": "sum",
+                "codigo": "count"
+            }).rename(columns={
+                "peso_larvas": "producao_total",
+                "peso_ovos": "ovos_total",
+                "codigo": "n_caixas"
+            })
+
+            # ================= INDICADORES =================
+            resumo["peso_medio"] = resumo["producao_total"] / resumo["n_caixas"]
+
+            resumo["eficiencia"] = resumo["producao_total"] / resumo["ovos_total"]
+
+            resumo["fcr"] = consumo_racao / (resumo["producao_total"] / 1000)
+
+            resumo["custo_total"] = (
+                (consumo_racao * custo_racao) * resumo["n_caixas"]
+                + (custo_operacional * resumo["n_caixas"])
+            )
+
+            resumo["custo_kg"] = resumo["custo_total"] / (resumo["producao_total"] / 1000)
+
+            resumo["receita"] = (resumo["producao_total"] / 1000) * preco_venda
+
+            resumo["lucro"] = resumo["receita"] - resumo["custo_total"]
+
+            # ================= SCORE =================
+            resumo["score"] = (
+                resumo["producao_total"] * 0.4 +
+                resumo["eficiencia"] * 0.3 +
+                (1 / resumo["fcr"]) * 0.3
+            )
+
+            # ================= RANKING =================
+            ranking = resumo.sort_values(by="score", ascending=False)
+
+            st.subheader("🏆 Ranking por Colônia Mãe")
+            st.dataframe(ranking)
+
+            # ================= GRÁFICOS =================
+            st.subheader("📈 Produção por Colônia Mãe")
+            st.bar_chart(resumo["producao_total"])
+
+            st.subheader("💰 Lucro por Colônia Mãe")
+            st.bar_chart(resumo["lucro"])
+
+            # ================= RESUMO GERAL =================
+            st.subheader("📌 Indicadores gerais")
+
+            col1, col2, col3 = st.columns(3)
+
+            col1.metric("Produção total (g)", int(resumo["producao_total"].sum()))
+            col2.metric("Lucro total (R$)", round(resumo["lucro"].sum(), 2))
+            col3.metric("Caixas totais", int(resumo["n_caixas"].sum()))
